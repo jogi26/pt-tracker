@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PT Attendance Scanner</title>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 16px; background: #f8f9fa; margin: 0; }
+      h3 { margin-top: 0; color: #1a73e8; }
+      .session-box { background: #e8f0fe; padding: 12px; border-radius: 6px; margin-bottom: 16px; border: 1px solid #aecbfa; }
+      label { font-size: 13px; font-weight: bold; color: #3c4043; display: block; margin-bottom: 6px; }
+      select, input[type="text"] { width: 100%; padding: 12px; font-size: 15px; border-radius: 4px; border: 1px solid #1a73e8; box-sizing: border-box; margin-bottom: 10px; }
+      #reader { width: 100%; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+      .btn { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background: #1a73e8; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; }
+      .btn-secondary { background: #5f6368; }
+      .status { padding: 12px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 14px; margin-top: 10px; }
+      .success { background-color: #d4edda; color: #155724; }
+      .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+  </head>
+  <body>
+    <h3>PT Attendance Scanner</h3>
+    
+    <div class="session-box">
+      <label for="sessionSelect">SELECT TARGET PT SESSION:</label>
+      <select id="sessionSelect">
+        <option value="">Loading sessions...</option>
+      </select>
+    </div>
+
+    <button id="camBtn" class="btn" onclick="toggleCamera()">📷 Start Camera Scanner</button>
+    <div id="reader" style="display:none;"></div>
+
+    <label for="scanInput">MANUAL / USB SCAN:</label>
+    <input type="text" id="scanInput" 
+    placeholder="Waiting for barcode scan..." onchange="handleTextScan()">
+    
+    <div id="statusBox" class="status" style="display:none;"></div>
+
+    <script>
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwOFbDV1lO1bmedop7JvCM25t3rieALONKVSGojWv4HytmJUh4kfk0HBOGsJ3BqdbKpNA/exec"; // Replace with your Google Apps Script Web App URL
+      let html5QrCode = null;
+      let isCameraOn = false;
+      let isProcessing = false;
+
+      window.onload = loadSessions;
+
+      async function loadSessions() {
+        try {
+          const res = await fetch(WEB_APP_URL + "?action=getSessions");
+          const sessions = await res.json();
+          const select = document.getElementById('sessionSelect');
+          select.innerHTML = '';
+          sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.colIndex;
+            opt.text = s.label;
+            select.appendChild(opt);
+          });
+        } catch(e) {
+          document.getElementById('sessionSelect').innerHTML = '<option value="">Error loading sessions</option>';
+        }
+      }
+
+      function toggleCamera() {
+        if (isCameraOn) stopCamera(); else startCamera();
+      }
+
+      function startCamera() {
+        document.getElementById('reader').style.display = 'block';
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 220 }, submitScan, () => {})
+          .then(() => {
+            isCameraOn = true;
+            document.getElementById('camBtn').innerText = "⏹ Stop Camera";
+            document.getElementById('camBtn').className = "btn btn-secondary";
+          }).catch(err => alert("Camera error: " + err));
+      }
+
+      function stopCamera() {
+        if (html5QrCode && isCameraOn) {
+          html5QrCode.stop().then(() => {
+            document.getElementById('reader').style.display = 'none';
+            document.getElementById('camBtn').innerText = "📷 Start Camera Scanner";
+            document.getElementById('camBtn').className = "btn";
+            isCameraOn = false;
+          });
+        }
+      }
+
+      function handleTextScan() {
+        const input = document.getElementById('scanInput');
+        if (input.value.trim()) {
+          submitScan(input.value.trim());
+          input.value = '';
+        }
+      }
+
+      async function submitScan(scannedVal) {
+        if (isProcessing) return;
+        const targetCol = document.getElementById('sessionSelect').value;
+        if (!targetCol) return alert('Select a session first!');
+
+        isProcessing = true;
+        const statusBox = document.getElementById('statusBox');
+        statusBox.style.display = 'block';
+        statusBox.className = 'status';
+        statusBox.innerText = 'Processing ' + scannedVal + '...';
+
+        try {
+          const response = await fetch(WEB_APP_URL, {
+            method: 'POST',
+            body: JSON.stringify({ scannedId: scannedVal, targetCol: targetCol })
+          });
+          const res = await response.json();
+          statusBox.className = 'status ' + (res.success ? 'success' : 'error');
+          statusBox.innerText = (res.success ? '✅ ' : '❌ ') + res.message;
+        } catch(err) {
+          statusBox.className = 'status error';
+          statusBox.innerText = '❌ Network Error';
+        }
+
+        setTimeout(() => { isProcessing = false; }, 2500);
+      }
+    </script>
+  </body>
+</html>
